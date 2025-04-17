@@ -12,15 +12,24 @@ def search_ltm_config(ltm_address, credentials, ip_to_find):
         stdin, stdout, stderr = ssh.exec_command(command)
         output = stdout.read().decode()
 
+        # Split output into virtual server blocks
         vip_blocks = re.split(r'\n(?=ltm virtual )', output)
+
         for block in vip_blocks:
-            if re.search(r'\b' + re.escape(ip_to_find) + r'\b', block):
-                match = re.search(r'ltm virtual (\S+)', block)
-                if match:
-                    vip_name = match.group(1)
-                    results.append((vip_name, ltm_address))
+            # Look for the destination IP pattern in the block
+            match = re.search(r'destination\s+(\S+)', block)
+            if match:
+                dest_ip_port = match.group(1)  # like 10.1.1.100:443
+                dest_ip = dest_ip_port.split('%')[0].split(':')[0]  # strip % route domain and port
+
+                if dest_ip == ip_to_find:
+                    vip_match = re.search(r'ltm virtual (\S+)', block)
+                    if vip_match:
+                        vip_name = vip_match.group(1)
+                        results.append((vip_name, ltm_address))
 
         ssh.close()
+
     except Exception as e:
         results.append((f"Error connecting to {ltm_address}: {e}", None))
     return results
@@ -34,7 +43,7 @@ def get_ltm_details():
 def main():
     ip_to_search = input("Enter IP address to search: ").strip()
     if not ip_to_search:
-        print("No IP address entered.")
+        print("No IP address entered. Exiting.")
         return
 
     ltms = get_ltm_details()
@@ -52,7 +61,7 @@ def main():
                     print(f"  Found VIP: {vip_name} on LTM: {ltm_ip}")
                     found_any = True
                 else:
-                    print(f"  {vip_name}")  # This is the error message
+                    print(f"  {vip_name}")  # error
 
     if not found_any:
         print(f"\nIP '{ip_to_search}' not found on any configured LTM.")
