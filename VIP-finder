@@ -1,0 +1,87 @@
+import re
+import tkinter as tk
+from tkinter import simpledialog, messagebox, scrolledtext
+import paramiko  # For SSH access (example)
+
+def search_ltm_config(ltm_address, credentials, ip_to_find):
+   
+    results = []
+    try:
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # For testing, consider proper host key management
+        ssh_client.connect(ltm_address, username=credentials['username'], password=credentials['password'])
+
+        command = "tmsh list ltm virtual all-properties"  # More robust way to get VIP info
+        stdin, stdout, stderr = ssh_client.exec_command(command)
+        output = stdout.read().decode('utf-8')
+
+        for line in output.splitlines():
+            if re.search(r'\b' + re.escape(ip_to_find) + r'\b', line):
+                # Found the IP, now find the VIP name
+                vip_match = re.search(r'ltm virtual (\S+)', output) # Adjust regex as needed
+                if vip_match:
+                    vip_name = vip_match.group(1)
+                    results.append((vip_name, ltm_address))
+                    break # Assuming one VIP per IP for simplicity, adjust if needed
+
+        ssh_client.close()
+    except Exception as e:
+        return [f"Error connecting to {ltm_address}: {e}"]
+    return results
+
+def get_ltm_details():
+    """Replace this with your actual logic to retrieve LTM management IPs and credentials."""
+    ltms = [
+        {'address': '10.1.1.11', 'credentials': {'username': 'admin', 'password': 'kailas@123'}},
+        {'address': '192.168.1.11', 'credentials': {'username': 'admin', 'password': 'password'}},
+        # Add more LTMs here
+    ]
+    return ltms
+
+def search_all_ltms(ip_to_search, output_area):
+    """Searches the provided IP across all configured LTMs."""
+    ltm_details = get_ltm_details()
+    all_results = []
+    for ltm in ltm_details:
+        output_area.insert(tk.END, f"Searching LTM: {ltm['address']}...\n")
+        results = search_ltm_config(ltm['address'], ltm['credentials'], ip_to_search)
+        if results:
+            for vip_name, ltm_ip in results:
+                output_area.insert(tk.END, f"  Found VIP: {vip_name} on LTM: {ltm_ip}\n")
+                all_results.append((vip_name, ltm_ip))
+        elif isinstance(results, list) and results and results[0].startswith("Error"):
+            output_area.insert(tk.END, f"  {results[0]}\n")
+        else:
+            output_area.insert(tk.END, "  IP not found on this LTM.\n")
+        output_area.see(tk.END) # Scroll to the end
+
+    if not all_results:
+        messagebox.showinfo("Search Results", f"IP '{ip_to_search}' not found on any configured LTM.")
+    else:
+        messagebox.showinfo("Search Results", f"Search for '{ip_to_search}' complete. See results below.")
+
+def get_ip_from_gui():
+    """Gets the IP address from the user via a simple dialog."""
+    ip_address = simpledialog.askstring("Input", "Enter IP Address to Search:")
+    return ip_address
+
+def main():
+    window = tk.Tk()
+    window.title("BIG-IP Configuration Search")
+
+    output_frame = tk.Frame(window)
+    output_frame.pack(pady=10, padx=10)
+
+    output_label = tk.Label(output_frame, text="Search Results:")
+    output_label.pack(anchor=tk.W)
+
+    output_area = scrolledtext.ScrolledText(output_frame, width=60, height=15)
+    output_area.pack()
+
+    search_button = tk.Button(window, text="Search for IP", command=lambda: search_all_ltms(get_ip_from_gui(), output_area))
+    search_button.pack(pady=10)
+
+    window.mainloop()
+
+if __name__ == "__main__":
+    main()
