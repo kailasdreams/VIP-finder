@@ -1,0 +1,61 @@
+import re
+import paramiko
+
+def search_ltm_config(ltm_address, credentials, ip_to_find):
+    results = []
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(ltm_address, username=credentials['username'], password=credentials['password'])
+
+        command = "tmsh list ltm virtual all-properties"
+        stdin, stdout, stderr = ssh.exec_command(command)
+        output = stdout.read().decode()
+
+        vip_blocks = re.split(r'\n(?=ltm virtual )', output)
+        for block in vip_blocks:
+            if re.search(r'\b' + re.escape(ip_to_find) + r'\b', block):
+                match = re.search(r'ltm virtual (\S+)', block)
+                if match:
+                    vip_name = match.group(1)
+                    results.append((vip_name, ltm_address))
+
+        ssh.close()
+    except Exception as e:
+        results.append((f"Error connecting to {ltm_address}: {e}", None))
+    return results
+
+def get_ltm_details():
+    return [
+        {'address': '10.1.1.11', 'credentials': {'username': 'admin', 'password': 'kailas@123'}},
+        {'address': '192.168.1.11', 'credentials': {'username': 'admin', 'password': 'password'}},
+    ]
+
+def main():
+    ip_to_search = input("Enter IP address to search: ").strip()
+    if not ip_to_search:
+        print("No IP address entered.")
+        return
+
+    ltms = get_ltm_details()
+    found_any = False
+
+    for ltm in ltms:
+        print(f"\nSearching LTM: {ltm['address']}...")
+        results = search_ltm_config(ltm['address'], ltm['credentials'], ip_to_search)
+
+        if not results:
+            print("  IP not found on this LTM.")
+        else:
+            for vip_name, ltm_ip in results:
+                if ltm_ip:
+                    print(f"  Found VIP: {vip_name} on LTM: {ltm_ip}")
+                    found_any = True
+                else:
+                    print(f"  {vip_name}")  # This is the error message
+
+    if not found_any:
+        print(f"\nIP '{ip_to_search}' not found on any configured LTM.")
+
+if __name__ == "__main__":
+    main()
